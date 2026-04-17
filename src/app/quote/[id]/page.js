@@ -3,6 +3,9 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
+import { db, storage } from "../../../lib/firebase";
+import { doc, getDoc, setDoc } from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 export default function QuotePage({ params }) {
   const router = useRouter();
@@ -31,30 +34,25 @@ export default function QuotePage({ params }) {
   });
 
   useEffect(() => {
-    const saved = JSON.parse(localStorage.getItem("mnz_quotations") || "[]");
-    const existing = saved.find(q => q.id === quoteId);
-    if (existing) {
-      setData(existing);
-    } else {
-      setData(prev => ({ 
-        ...prev, 
-        items: [{ id: Date.now(), showImage: false, image: "", description: "", quantity: 1, unitPrice: 0 }] 
-      }));
-    }
+    const fetchQuote = async () => {
+      const docRef = doc(db, "quotations", quoteId);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        setData(docSnap.data());
+      } else {
+        setData(prev => ({ 
+          ...prev, 
+          items: [{ id: Date.now(), showImage: false, image: "", description: "", quantity: 1, unitPrice: 0 }] 
+        }));
+      }
+    };
+    fetchQuote();
   }, [quoteId]);
 
-  const saveQuote = (e) => {
+  const saveQuote = async (e) => {
     if (e) e.preventDefault();
-    const saved = JSON.parse(localStorage.getItem("mnz_quotations") || "[]");
     const updatedData = { ...data, ...calculateTotals() };
-    
-    const idx = saved.findIndex(q => q.id === quoteId);
-    if (idx >= 0) {
-      saved[idx] = updatedData;
-    } else {
-      saved.push(updatedData);
-    }
-    localStorage.setItem("mnz_quotations", JSON.stringify(saved));
+    await setDoc(doc(db, "quotations", quoteId), updatedData);
     alert("Quotation saved successfully!");
   };
 
@@ -96,14 +94,20 @@ export default function QuotePage({ params }) {
     }));
   };
 
-  const handleImageUpload = (id, e) => {
+  const handleImageUpload = async (id, e) => {
     const file = e.target.files[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        updateItem(id, 'image', reader.result);
-      };
-      reader.readAsDataURL(file);
+      try {
+        updateItem(id, 'description', data.items.find(i => i.id === id).description + "\n(Uploading image...)");
+        const imageRef = ref(storage, `quotes/${quoteId}/${id}-${file.name}`);
+        await uploadBytes(imageRef, file);
+        const url = await getDownloadURL(imageRef);
+        updateItem(id, 'image', url);
+        updateItem(id, 'description', data.items.find(i => i.id === id).description.replace("\n(Uploading image...)", ""));
+      } catch (error) {
+        alert("Error uploading image");
+        console.error(error);
+      }
     }
   };
 

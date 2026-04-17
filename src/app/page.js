@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { db } from "../lib/firebase";
+import { collection, onSnapshot, deleteDoc, doc, updateDoc } from "firebase/firestore";
 
 export default function Home() {
   const [quotes, setQuotes] = useState([]);
@@ -9,28 +11,29 @@ export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    const savedQuotes = JSON.parse(localStorage.getItem("mnz_quotations") || "[]");
-    setQuotes(savedQuotes);
+    const q = collection(db, "quotations");
+    const unsub = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      data.sort((a, b) => b.id.localeCompare(a.id));
+      setQuotes(data);
+    });
+    return () => unsub();
   }, []);
 
-  const handleCreate = () => {
-    const id = `Q${Math.floor(Math.random() * 100000)}`;
-    router.push(`/quote/${id}`);
+  const createNewQuote = () => {
+    const newId = `Q-${Date.now().toString().slice(-6)}`;
+    router.push(`/quote/${newId}`);
   };
 
-  const deleteQuote = (id) => {
+  const deleteQuote = async (id) => {
     if (confirm("Are you sure you want to delete this quotation?")) {
-      const newQuotes = quotes.filter((q) => q.id !== id);
-      setQuotes(newQuotes);
-      localStorage.setItem("mnz_quotations", JSON.stringify(newQuotes));
+      await deleteDoc(doc(db, "quotations", id));
     }
   };
 
-  const convertToInvoice = (id) => {
+  const convertToInvoice = async (id) => {
     if (confirm("Convert this Quote to an Invoice? The payment terms will now show.")) {
-      const newQuotes = quotes.map((q) => q.id === id ? { ...q, isInvoice: true } : q);
-      setQuotes(newQuotes);
-      localStorage.setItem("mnz_quotations", JSON.stringify(newQuotes));
+      await updateDoc(doc(db, "quotations", id), { isInvoice: true });
     }
   };
 
@@ -46,7 +49,7 @@ export default function Home() {
           <h1 className="page-title" style={{marginBottom: 0}}>Quotations Dashboard</h1>
           <p style={{color: 'var(--text-secondary)'}}>Manage, search, and edit your quotations</p>
         </div>
-        <button onClick={handleCreate} className="btn btn-primary">
+        <button onClick={createNewQuote} className="btn btn-primary">
           + Create New Quotation
         </button>
       </div>
