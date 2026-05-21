@@ -12,6 +12,9 @@ export default function QuotePage({ params }) {
   const quoteId = params.id;
   
   const [isPreview, setIsPreview] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState(null); // { type: 'success' | 'error', message: string } or null
   const [data, setData] = useState({
     id: quoteId,
     customer: "",
@@ -35,15 +38,26 @@ export default function QuotePage({ params }) {
 
   useEffect(() => {
     const fetchQuote = async () => {
-      const docRef = doc(db, "quotations", quoteId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setData(docSnap.data());
-      } else {
-        setData(prev => ({ 
-          ...prev, 
-          items: [{ id: Date.now(), showImage: false, image: "", description: "", quantity: 1, unitPrice: 0 }] 
-        }));
+      try {
+        setIsLoading(true);
+        const docRef = doc(db, "quotations", quoteId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          setData(prev => ({
+            ...prev,
+            ...docSnap.data()
+          }));
+        } else {
+          setData(prev => ({ 
+            ...prev, 
+            items: [{ id: Date.now(), showImage: false, image: "", description: "", quantity: 1, unitPrice: 0 }] 
+          }));
+        }
+      } catch (error) {
+        console.error("Error fetching quotation:", error);
+        setSaveStatus({ type: 'error', message: "Failed to load quotation data from server." });
+      } finally {
+        setIsLoading(false);
       }
     };
     fetchQuote();
@@ -51,9 +65,26 @@ export default function QuotePage({ params }) {
 
   const saveQuote = async (e) => {
     if (e) e.preventDefault();
-    const updatedData = { ...data, ...calculateTotals() };
-    await setDoc(doc(db, "quotations", quoteId), updatedData);
-    alert("Quotation saved successfully!");
+    if (isSaving) return;
+
+    setIsSaving(true);
+    setSaveStatus(null);
+
+    try {
+      const updatedData = { ...data, ...calculateTotals() };
+      await setDoc(doc(db, "quotations", quoteId), updatedData);
+      setSaveStatus({ type: "success", message: "Quotation saved successfully!" });
+      
+      // Auto-clear success message after 3 seconds
+      setTimeout(() => {
+        setSaveStatus(null);
+      }, 3000);
+    } catch (error) {
+      console.error("Error saving quotation:", error);
+      setSaveStatus({ type: "error", message: `Failed to save: ${error.message || error}` });
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleInputChange = (field, value) => {
@@ -71,6 +102,28 @@ export default function QuotePage({ params }) {
   };
 
   const totals = calculateTotals();
+
+  if (isLoading) {
+    return (
+      <div className="app-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', minHeight: '60vh', justifyContent: 'center', alignItems: 'center' }}>
+        <div className="spinner-glow" style={{
+          width: '50px',
+          height: '50px',
+          borderRadius: '50%',
+          border: '3px solid var(--border-color)',
+          borderTopColor: 'var(--accent-primary)',
+          animation: 'spin 1s linear infinite',
+          boxShadow: '0 0 15px rgba(59, 130, 246, 0.3)'
+        }}></div>
+        <p style={{ color: 'var(--text-secondary)', fontStyle: 'italic', fontSize: '1.1rem', letterSpacing: '0.05em' }}>Loading Quotation details...</p>
+        <style>{`
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    );
+  }
 
   // Item Handlers
   const addItem = () => {
@@ -242,6 +295,59 @@ export default function QuotePage({ params }) {
   // Edit Mode
   return (
     <div className="app-container">
+      <style>{`
+        .button-spinner {
+          display: inline-block;
+          width: 1rem;
+          height: 1rem;
+          border: 2px solid rgba(255, 255, 255, 0.3);
+          border-radius: 50%;
+          border-top-color: white;
+          animation: button-spin 1s linear infinite;
+        }
+        @keyframes button-spin {
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+
+      {/* Toast Notification */}
+      {saveStatus && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: 9999,
+          background: saveStatus.type === 'success' ? 'var(--success)' : 'var(--danger)',
+          color: 'white',
+          padding: '0.75rem 2rem',
+          borderRadius: 'var(--radius-md)',
+          boxShadow: 'var(--shadow-lg)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem',
+          fontWeight: '600',
+          animation: 'slideDown 0.3s ease-out'
+        }}>
+          {saveStatus.type === 'success' ? (
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+            </svg>
+          ) : (
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          )}
+          {saveStatus.message}
+          <style>{`
+            @keyframes slideDown {
+              from { top: -50px; opacity: 0; }
+              to { top: 20px; opacity: 1; }
+            }
+          `}</style>
+        </div>
+      )}
+
       <div className="flex justify-between items-center mb-8">
         <div>
           <button className="btn btn-outline mb-4" onClick={() => router.push('/')} style={{padding: '0.5rem 1rem'}}>
@@ -251,7 +357,23 @@ export default function QuotePage({ params }) {
         </div>
         <div className="flex gap-4">
           <button onClick={() => setIsPreview(true)} className="btn btn-outline">Preview & Print Document</button>
-          <button onClick={saveQuote} className="btn btn-primary">Save Quotation</button>
+          <button onClick={saveQuote} className="btn btn-primary" disabled={isSaving} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', minWidth: '140px' }}>
+            {isSaving ? (
+              <>
+                <span className="button-spinner" />
+                Saving...
+              </>
+            ) : saveStatus?.type === 'success' ? (
+              <>
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                Saved!
+              </>
+            ) : (
+              "Save Quotation"
+            )}
+          </button>
         </div>
       </div>
 
@@ -449,7 +571,23 @@ export default function QuotePage({ params }) {
       </div>
       
       <div className="flex gap-4">
-         <button onClick={saveQuote} className="btn btn-primary" style={{padding: '1rem 2rem', fontSize: '1.1rem'}}>Confirm & Save Data</button>
+         <button onClick={saveQuote} className="btn btn-primary" style={{padding: '1rem 2rem', fontSize: '1.1rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem'}} disabled={isSaving}>
+            {isSaving ? (
+              <>
+                <span className="button-spinner" />
+                Saving...
+              </>
+            ) : saveStatus?.type === 'success' ? (
+              <>
+                <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="3">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+                Saved Successfully!
+              </>
+            ) : (
+              "Confirm & Save Data"
+            )}
+         </button>
       </div>
 
     </div>
